@@ -252,7 +252,8 @@ class TabPFNUnsupervisedModel(BaseEstimator):
         # Get a numpy array from X for feature inference
         X_np = X
         if torch.is_tensor(X_np):
-            X_np = X_np.cpu().numpy()
+            X_np = X_np.cpu().numpy() 
+            
 
         self.categorical_features = infer_categorical_features(
             X_np,
@@ -292,25 +293,25 @@ class TabPFNUnsupervisedModel(BaseEstimator):
         n_features = X.shape[1]
         all_features = list(range(n_features))
 
-        X_fit = self.X_
+        X_fit = self.X_ #model.fit(X) 에서 tensor로 변환되고 deepcopy된 X
         impute_X = copy.deepcopy(X)
 
         columns_with_nan = [
             col_idx
             for col_idx in all_features
             if torch.isnan(impute_X[:, col_idx]).any()
-        ]
+        ] #missing value가 있는 컬럼들
 
         for column_idx in tqdm(columns_with_nan):
-            y_predict = impute_X[:, column_idx]
+            y_predict = impute_X[:, column_idx] #impute_X 는 tensor 형태의 X이고, 각 결측치 열에 대해서 예측할때의 y가 되는 열을 y_predict로 지정
 
-            if not condition_on_all_features:
-                conditional_idx = all_features[:column_idx] if column_idx > 0 else []
+            if not condition_on_all_features: #결측 2열을 작동할때는 결측 1열의 index도 conditional index 포함
+                conditional_idx = all_features[:column_idx] if column_idx > 0 else [] #missing이 존재하는 첫번째 열인 3열이 있다면 cond idx [1,2,3]
             else:
-                conditional_idx = list(set(range(X.shape[1])) - {column_idx})
+                conditional_idx = list(set(range(X.shape[1])) - {column_idx})  #결측 i열 빼고는 전부 cond index에 포함
 
-            X_where_y_is_nan = impute_X[torch.isnan(y_predict)]
-            X_where_y_is_nan = X_where_y_is_nan.reshape(-1, impute_X.shape[1])
+            X_where_y_is_nan = impute_X[torch.isnan(y_predict)] #결측치를 채우고자 하는 y_predict 열에서 결측치가 있는 행들만 추출
+            X_where_y_is_nan = X_where_y_is_nan.reshape(-1, impute_X.shape[1]) # 만약 y에 isnan이 없다면 (0, n_features)-> reshape으로 보장
 
             densities: list[Any] = []
             # Use fewer permutations in fast mode
@@ -319,8 +320,8 @@ class TabPFNUnsupervisedModel(BaseEstimator):
             for perm in efficient_random_permutation(
                 conditional_idx,
                 actual_n_permutations,
-            ):
-                perm = (*perm, column_idx)
+            ): #conditional idx를 랜덤하게 섞은 perm을 actual_n_permutations 개수만큼 생성; 각 perm은 list[int] 형태
+                perm = (*perm, column_idx) #튜플형태로 바꾸고, target column_idx 추가 -> (conditional idx..., target idx)
                 _, pred = self.impute_single_permutation_(
                     X_where_y_is_nan,
                     perm,
@@ -328,6 +329,7 @@ class TabPFNUnsupervisedModel(BaseEstimator):
                     condition_on_all_features,
                 )
                 densities.append(pred)
+
 
             if not self.use_classifier_(column_idx, X_fit[:, column_idx]):
                 pred_merged = densities[0][
@@ -361,7 +363,7 @@ class TabPFNUnsupervisedModel(BaseEstimator):
     def impute_single_permutation_(
         self,
         X: torch.Tensor,
-        feature_permutation: list[int] | tuple[int, ...],
+        feature_permutation: list[int] | tuple[int, ...], # impute_ 함수에서 받는 list=perm (conditional idx..., target idx) 형태
         t: float = 0.000000001,
         condition_on_all_features: bool = True,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
@@ -385,7 +387,7 @@ class TabPFNUnsupervisedModel(BaseEstimator):
             y_predict = impute_X[:, column_idx]
 
             if torch.isnan(y_predict).sum() == 0:
-                continue
+                continue #continue는 true일때 다음 루프로 넘어감 
 
             X_where_y_is_nan = impute_X[torch.isnan(y_predict)]
             X_where_y_is_nan = X_where_y_is_nan.reshape(-1, impute_X.shape[1])
@@ -497,12 +499,12 @@ class TabPFNUnsupervisedModel(BaseEstimator):
         # Initialize model if needed
         self.init_model_and_get_model_config()
 
-        if len(conditional_idx) > 0:
+        if len(conditional_idx) > 0: #conditional_idx를 column_idx 이외의 모든 feature로 설정한 경우는 작동
             # If not the first feature, use all previous features
-            mask = torch.zeros_like(X_fit).bool()
-            mask[:, conditional_idx] = True
-            X_fit, y_fit = X_fit[mask], X_fit[:, column_idx]
-            X_fit = X_fit.reshape(mask.shape[0], -1)
+            mask = torch.zeros_like(X_fit).bool() #X_fit와 같은 shape의 False로 채워진 tensor 생성
+            mask[:, conditional_idx] = True #conditional idx 위치만 True로 변경
+            X_fit, y_fit = X_fit[mask], X_fit[:, column_idx] #mask가 bool이기 때문에 True 위치의 값들만 벡터로 추출함(행 순서)
+            X_fit = X_fit.reshape(mask.shape[0], -1) #mask와 동일한 행 개수로 맞춰주면, 열 개수는 p-1로 자동 생성될것임
 
             mask = torch.zeros_like(X_predict).bool()
             mask[:, conditional_idx] = True
